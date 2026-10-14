@@ -4,10 +4,11 @@
  */
 import type { Lab, LightingIssue, LinearRgb, Point } from "@/types/analysis";
 import { faceBounds, faceWidthRatio, skinPatches } from "@/features/landmark/geometry";
-import { SCENE_THUMB } from "./constants";
+import { SCENE_THUMB, WHITE_SEARCH_THUMB } from "./constants";
 import { sceneGains } from "./illuminant";
 import { checkLighting } from "./lighting";
 import { lumaStats, meanRgb, medianLab, meanLinearRgbMasked, representativeLab } from "./sample";
+import { findWhiteCandidate } from "./whitePoint";
 
 /** 렌더·샘플링 해상도 상한. 이보다 크면 비례 축소 */
 export const MAX_RENDER_WIDTH = 720;
@@ -65,6 +66,31 @@ export function patchAt(ctx: CanvasRenderingContext2D, u: number, v: number, siz
 export function skinLuma(ctx: CanvasRenderingContext2D, lm: Point[], w: number, h: number): number {
   const stats = skinPatches(lm, w, h).map((r) => lumaStats(ctx.getImageData(r.x, r.y, r.w, r.h).data).meanLuma);
   return stats.reduce((a, b) => a + b, 0) / Math.max(1, stats.length);
+}
+
+/** 얼굴 밖에서 흰 종이·흰 벽으로 보이는 자리(정규화 좌표). 이용자에게 제안만 한다 */
+export function suggestWhitePoint(ctx: CanvasRenderingContext2D, lm: Point[], w: number, h: number): { u: number; v: number } | null {
+  const skin = skinPatches(lm, w, h)
+    .map((r) => meanLinearRgbMasked(ctx.getImageData(r.x, r.y, r.w, r.h).data, r.w, () => true))
+    .filter((c): c is LinearRgb => c !== null);
+  if (!skin.length) return null;
+  const avg = (k: keyof LinearRgb) => skin.reduce((s, c) => s + c[k], 0) / skin.length;
+  const { w: tw, h: th } = WHITE_SEARCH_THUMB;
+  const thumb = createOffscreen(tw, th, true);
+  thumb.drawImage(ctx.canvas, 0, 0, tw, th);
+  const b = faceBounds(lm);
+  return findWhiteCandidate({
+    pixels: thumb.getImageData(0, 0, tw, th).data,
+    width: tw,
+    height: th,
+    include: (x, y) => {
+      const u = (x + 0.5) / tw;
+      const v = (y + 0.5) / th;
+      return u < b.minX || u > b.maxX || v < b.minY || v > b.maxY;
+    },
+    skinLuma: skinLuma(ctx, lm, w, h),
+    skin: { r: avg("r"), g: avg("g"), b: avg("b") },
+  });
 }
 
 export function measureLighting(

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import type { FaceLandmarker } from "@mediapipe/tasks-vision";
-import type { Point } from "@/types/analysis";
-import { createContext, createOffscreen, fitSize, measureLighting, patchAt, sampleSkin, skinLuma, THUMB_SIZE } from "@/features/analysis/frame";
+import type { LightingIssue, Point } from "@/types/analysis";
+import { createContext, createOffscreen, fitSize, measureLighting, patchAt, sampleSkin, skinLuma, suggestWhitePoint, THUMB_SIZE } from "@/features/analysis/frame";
 import { WHITE_PATCH_RATIO } from "@/features/analysis/constants";
 import { checkWhitePatch, whiteGains } from "@/features/analysis/whitePoint";
 import { MAX_SHOTS } from "@/features/analysis/shots";
@@ -48,6 +48,10 @@ export interface StillPhoto {
   thumb: string;
   /** 이용자가 찍은 흰색 기준 자리(정규화 좌표) */
   white?: { u: number; v: number };
+  /** 자동으로 찾은 흰 종이·흰 벽 후보(정규화 좌표). 이용자가 고르면 white가 된다 */
+  whiteHint: { u: number; v: number } | null;
+  /** 이 사진의 조명 점검 결과 */
+  lighting: LightingIssue[];
 }
 
 const WHITE_ERRORS = {
@@ -110,12 +114,13 @@ export function useStillAnalysis({ canvasRef, landmarkerRef }: Params) {
         track({ name: "face-not-found", source: "image" });
         return "noFace";
       }
-      store.setLighting(measureLighting(ctx, createOffscreen(THUMB_SIZE.w, THUMB_SIZE.h, true), points, w, h));
+      const lighting = measureLighting(ctx, createOffscreen(THUMB_SIZE.w, THUMB_SIZE.h, true), points, w, h);
+      store.setLighting(lighting);
       const skin = sampleSkin(ctx, points, w, h);
       if (!skin) return "noSkin";
       const id = store.addShot(skin);
       const kept = new Set(useAnalysisStore.getState().shots.map((s) => s.id));
-      const photo = { id, img, landmarks: points, thumb: makeThumb(img) };
+      const photo = { id, img, landmarks: points, thumb: makeThumb(img), whiteHint: suggestWhitePoint(ctx, points, w, h), lighting };
       setPhotos((prev) => [...prev, photo].filter((p) => kept.has(p.id)));
       return "ok";
     },

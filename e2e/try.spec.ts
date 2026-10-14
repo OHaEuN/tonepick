@@ -70,3 +70,20 @@ test.describe("폰 화면 폭", () => {
     }
   });
 });
+
+test("형광등 아래에서 찍어도 사진 속 흰 종이를 찾아 맞추면 자연광과 같은 색으로 읽는다", async ({ page }) => {
+  await waitForModel(page);
+  const hueAfterWhiteFix = async (file: string) => {
+    await page.getByLabel("사진 올리기").first().setInputFiles(file);
+    await page.getByRole("button", { name: "찾은 흰색으로 맞추기" }).click({ timeout: MODEL_TIMEOUT });
+    await expect(page.getByText("흰색 기준으로 색을 맞췄어요")).toBeVisible();
+    const details = page.locator("details", { hasText: "고급" });
+    if (!(await details.getAttribute("open"))) await details.locator("summary").click();
+    const text = await details.locator("p.font-mono").textContent();
+    return Number(/hue ([\d.]+)°/.exec(text ?? "")?.[1]);
+  };
+  const daylight = await hueAfterWhiteFix("e2e/fixtures/face-paper.jpg");
+  await page.getByRole("button", { name: "처음으로" }).click();
+  const fluorescent = await hueAfterWhiteFix("e2e/fixtures/face-paper-fluorescent.jpg");
+  expect(Math.abs(daylight - fluorescent)).toBeLessThan(2);
+});

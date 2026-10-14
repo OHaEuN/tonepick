@@ -8,6 +8,7 @@ import { track } from "@/features/analytics/track";
 import { useCameraStream } from "@/features/camera/useCameraStream";
 import { ensureVideoMode, useFaceLandmarker } from "@/features/landmark/useFaceLandmarker";
 import { useAnalysisStore } from "@/stores/analysisStore";
+import type { LightingIssue } from "@/types/analysis";
 import { AdvancedPanel } from "./AdvancedPanel";
 import { LightingBadges } from "./LightingBadges";
 import { ModelLoading } from "./ModelLoading";
@@ -233,6 +234,14 @@ export function TrySession() {
                     picking={pickingWhite}
                     message={whiteMessage}
                     multiple={still.photos.length > 1}
+                    hasHint={Boolean(still.shown.whiteHint)}
+                    cast={still.shown.lighting.find((i) => i === "warmCast" || i === "coolCast" || i === "greenCast") ?? null}
+                    onUseHint={() => {
+                      const hint = still.shown?.whiteHint;
+                      if (!hint || !still.shown) return;
+                      setPickingWhite(false);
+                      setWhiteMessage(still.setWhitePoint(still.shown.id, hint.u, hint.v));
+                    }}
                     onToggle={() => {
                       setWhiteMessage(null);
                       setPickingWhite((v) => !v);
@@ -267,35 +276,68 @@ interface WhiteFixCardProps {
   picking: boolean;
   message: string | null;
   multiple: boolean;
+  /** 사진에서 흰색 후보를 자동으로 찾았다 */
+  hasHint: boolean;
+  /** 이 사진에서 잡힌 조명 색 */
+  cast: LightingIssue | null;
+  onUseHint: () => void;
   onToggle: () => void;
 }
 
-/** 사진 속 흰색을 눌러 조명을 완전히 되돌리는 보정. 같은 사람이 사진마다 다르게 나오는 걸 가장 크게 줄인다 */
-function WhiteFixCard({ fixed, picking, message, multiple, onToggle }: WhiteFixCardProps) {
+const CAST_NOTES: Partial<Record<LightingIssue, string>> = {
+  greenCast: "형광등 같은 초록빛 조명이 섞였어요.",
+  warmCast: "주황빛 조명이 섞였어요.",
+  coolCast: "푸른빛 조명이 섞였어요.",
+};
+
+/**
+ * 사진 속 흰색을 기준으로 조명을 완전히 되돌리는 보정. 같은 사람이 사진마다·조명마다 다르게 나오는 걸 가장 크게 줄인다.
+ * 형광등처럼 배경 색만으론 다 못 되돌리는 조명이면 앞에 내세운다
+ */
+function WhiteFixCard({ fixed, picking, message, multiple, hasHint, cast, onUseHint, onToggle }: WhiteFixCardProps) {
+  const urgent = !fixed && cast !== null;
+  const secondary = "border border-line bg-card hover:bg-accent-soft";
   return (
-    <div className="space-y-2 rounded-2xl border border-line p-4 text-sm">
-      <p className="font-medium">{fixed ? "흰색 기준으로 색을 맞췄어요" : "더 정확하게: 흰색 기준 맞추기"}</p>
+    <div className={`space-y-2 rounded-2xl border p-4 text-sm ${urgent ? "border-amber-300 bg-amber-50" : "border-line"}`}>
+      <p className="font-medium">
+        {fixed ? "흰색 기준으로 색을 맞췄어요" : urgent ? "이 조명에선 흰색 기준을 맞춰야 정확해요" : "더 정확하게: 흰색 기준 맞추기"}
+      </p>
       <p className="text-muted">
         {fixed
-          ? "사진 속 흰색을 기준으로 조명의 색과 밝기를 되돌렸어요. 다른 곳을 눌러 다시 맞출 수도 있어요."
-          : "사진에 흰 종이·흰 벽·흰 옷이 있으면 눌러 주세요. 조명 때문에 생긴 노란 기·푸른 기·밝기 차이를 없애서 사진마다 결과가 덜 달라져요."}
-        {multiple && " 사진마다 따로 맞춰요. 위에서 사진을 고른 뒤 눌러 주세요."}
+          ? "표시한 곳의 흰색을 기준으로 조명의 색과 밝기를 되돌렸어요. 흰색이 아닌 곳이면 다시 맞춰 주세요."
+          : `${cast ? `${CAST_NOTES[cast]} ` : ""}${
+              hasHint
+                ? "사진에서 흰 종이·흰 벽으로 보이는 곳을 찾았어요. 그걸로 맞추거나 직접 눌러 주세요."
+                : "사진에 흰 종이·흰 벽·흰 옷이 있으면 눌러 주세요. 없으면 흰 종이를 얼굴 옆에 들고 다시 찍어 주세요."
+            } 조명 때문에 생긴 노란 기·푸른 기·초록 기와 밝기 차이를 없애요.`}
+        {multiple && " 사진마다 따로 맞춰요. 위에서 사진을 고른 뒤 맞춰 주세요."}
       </p>
       {message && (
         <p role="alert" className="text-amber-900">
           {message}
         </p>
       )}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-pressed={picking}
-        className={`rounded-full px-4 py-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
-          picking ? "bg-fg text-white" : "border border-line bg-card hover:bg-accent-soft"
-        }`}
-      >
-        {picking ? "취소" : fixed ? "다시 맞추기" : "사진에서 흰색 누르기"}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        {!fixed && hasHint && !picking && (
+          <button
+            type="button"
+            onClick={onUseHint}
+            className="rounded-full bg-fg px-4 py-2 font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            찾은 흰색으로 맞추기
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-pressed={picking}
+          className={`rounded-full px-4 py-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+            picking ? "bg-fg text-white" : secondary
+          }`}
+        >
+          {picking ? "취소" : fixed ? "다시 맞추기" : hasHint ? "직접 누르기" : "사진에서 흰색 누르기"}
+        </button>
+      </div>
     </div>
   );
 }

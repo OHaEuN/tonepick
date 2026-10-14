@@ -66,6 +66,7 @@ export type LightingIssue =
   | "bright"
   | "warmCast"
   | "coolCast"
+  | "greenCast"
   | "faceSmall";
 
 export interface LightingInput {

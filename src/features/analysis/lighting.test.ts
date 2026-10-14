@@ -27,6 +27,11 @@ describe("checkLighting", () => {
     expect(checkLighting({ ...GOOD, frameMean: { r: 110, g: 120, b: 160 } })).toEqual(["coolCast"]);
   });
 
+  it("G가 R·B보다 도드라지면(형광등) greenCast만. 전구색·푸른빛으로 같이 잡지 않는다", () => {
+    expect(checkLighting({ ...GOOD, frameMean: { r: 100, g: 125, b: 95 } })).toEqual(["greenCast"]);
+    expect(checkLighting({ ...GOOD, frameMean: { r: 140, g: 120, b: 105 } })).toEqual([]);
+  });
+
   it("얼굴이 작으면 faceSmall", () => {
     expect(checkLighting({ ...GOOD, faceWidthRatio: 0.1 })).toEqual(["faceSmall"]);
   });
